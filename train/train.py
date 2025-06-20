@@ -1,6 +1,7 @@
 import json
 import os
 import torch
+import torch.distributed as dist
 import wandb
 import random
 import argparse
@@ -149,15 +150,27 @@ training_args = TrainingArguments(
     save_total_limit=3,
 )
 
-# Move head to device after trainer is initialized
+# Handle FSDP device placement for head module
 class EagleTrainerWithFSDP(EagleTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Move head to the same device and dtype as the model after FSDP wrapping
-        if self.model is not None:
-            device = next(self.model.parameters()).device
-            dtype = next(self.model.parameters()).dtype
-            self.head = self.head.to(device=device, dtype=dtype)
+        self._head_device = None
+        
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        # Move head to the same device as the inputs on first use
+        if self._head_device is None or self._head_device != inputs["input_ids"].device:
+            self._head_device = inputs["input_ids"].device
+            self.head = self.head.to(device=self._head_device, dtype=torch.bfloat16)
+        
+        return super().compute_loss(model, inputs, return_outputs, num_items_in_batch)
+    
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys):
+        # Move head to the same device as the inputs on first use
+        if self._head_device is None or self._head_device != inputs["input_ids"].device:
+            self._head_device = inputs["input_ids"].device
+            self.head = self.head.to(device=self._head_device, dtype=torch.bfloat16)
+        
+        return super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
 
 trainer = EagleTrainerWithFSDP(
     model=draft_model,
@@ -170,4 +183,5 @@ trainer = EagleTrainerWithFSDP(
 )
 
 trainer.train()
-trainer.push_to_hub(hf_repo)
+if dist.get_rank() == 0:
+    trainer.push_to_hub(hf_repo)
