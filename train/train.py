@@ -30,6 +30,7 @@ parser.add_argument("--model-path", type=str, default=os.environ["MODEL_PATH"])
 parser.add_argument("--sharegpt-datapaths", type=str, default=os.environ["SHAREGPT_DATAPATHS"])
 parser.add_argument("--ultra-chat-datapaths", type=str, default=os.environ["ULTRACHAT_DATAPATHS"])
 parser.add_argument("--output-dir", type=str, default=f"./hf_trainer_output_dir/{wandb_run_name}")
+parser.add_argument("--epochs", type=int, default=10)
 args = parser.parse_args()
 
 model_path = args.model_path
@@ -111,7 +112,7 @@ eagle_collator = DataCollatorWithPadding()
 
 training_args = TrainingArguments(
     output_dir=args.output_dir,
-    num_train_epochs=10,
+    num_train_epochs=args.epochs,
     gradient_accumulation_steps=16,
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
