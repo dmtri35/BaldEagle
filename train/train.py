@@ -114,6 +114,7 @@ training_args = TrainingArguments(
     output_dir=args.output_dir,
     num_train_epochs=args.epochs,
     gradient_accumulation_steps=16,
+    fsdp=True,
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     remove_unused_columns=False,
