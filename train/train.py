@@ -3,6 +3,7 @@ import os
 import torch
 import wandb
 import random
+import argparse
 
 from safetensors import safe_open
 
@@ -24,9 +25,17 @@ run_name = "06-20-2025-Qwen2.5-7B-Instruct-EAGLE"
 wandb.init(project="BaldEagle", mode="offline", name=run_name)
 wandb_run_name = wandb.run.name
 
-model_path = os.environ["MODEL_PATH"]
-sharegpt_datapaths = os.environ["SHAREGPT_DATAPATHS"]
-ultra_chat_datapaths = os.environ["ULTRACHAT_DATAPATHS"]
+parser = argparse.ArgumentParser()
+parser.add_argument("--model-path", type=str, default=os.environ["MODEL_PATH"])
+parser.add_argument("--sharegpt-datapaths", type=str, default=os.environ["SHAREGPT_DATAPATHS"])
+parser.add_argument("--ultra-chat-datapaths", type=str, default=os.environ["ULTRACHAT_DATAPATHS"])
+parser.add_argument("--output-dir", type=str, default=f"./hf_trainer_output_dir/{wandb_run_name}")
+args = parser.parse_args()
+
+model_path = args.model_path
+sharegpt_datapaths = args.sharegpt_datapaths
+ultra_chat_datapaths = args.ultra_chat_datapaths
+hf_repo = "baseten-admin/qwen2-5-eagle-test"
 
 # -------------------------------- Load original Llama weights --------------------------------
 
@@ -101,7 +110,7 @@ eagle_collator = DataCollatorWithPadding()
 # -------------------------------- Train --------------------------------
 
 training_args = TrainingArguments(
-    output_dir=f"./hf_trainer_output_dir/{wandb_run_name}/",
+    output_dir=args.output_dir,
     num_train_epochs=10,
     gradient_accumulation_steps=16,
     per_device_train_batch_size=1,
@@ -136,4 +145,4 @@ trainer = EagleTrainer(
 )
 
 trainer.train()
-trainer.push_to_hub("baseten-admin/qwen2-5-eagle-test")
+trainer.push_to_hub(hf_repo)
