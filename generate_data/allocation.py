@@ -22,7 +22,7 @@ elif args.dataset == "ultrachat":
 elif args.dataset == "mixture_of_thoughts":
     e = 100000 - 1
 
-gpus = [[0], [1]]
+gpus = [[0], [1], [2], [3], [4], [5], [6], [7]]
 num_p = len(gpus)
 outdir = f"{args.outdir.rstrip('/')}/qwen2_5b_eagle_1_{args.dataset}_{s}_{e}_mufp16"
 

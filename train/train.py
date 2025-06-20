@@ -8,7 +8,8 @@ from safetensors import safe_open
 
 from transformers.models.llama.configuration_llama import LlamaConfig
 
-from transformers import AutoTokenizer, TrainingArguments
+from transformers import AutoTokenizer
+from transformers.training_args import TrainingArguments
 
 from modules.model.llama_eagle import LlamaForCausalLMEagle
 from modules.data.data import (
@@ -19,41 +20,44 @@ from modules.data.data import (
 )
 from modules.trainer.trainer import EagleTrainer
 
-wandb.init(project="BaldEagle")
+run_name = "06-20-2025-Qwen2.5-7B-Instruct-EAGLE"
+wandb.init(project="BaldEagle", mode="offline", name=run_name)
 wandb_run_name = wandb.run.name
 
-path = "models/llama-8b/"
+model_path = os.environ["MODEL_PATH"]
+sharegpt_datapaths = os.environ["SHAREGPT_DATAPATHS"]
+ultra_chat_datapaths = os.environ["ULTRACHAT_DATAPATHS"]
 
 # -------------------------------- Load original Llama weights --------------------------------
 
-with open(os.path.join(path, "model.safetensors.index.json"), "r") as f:
+with open(os.path.join(model_path, "model.safetensors.index.json"), "r") as f:
     index_json = json.loads(f.read())
     emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
     lm_head_path = index_json["weight_map"]["lm_head.weight"]
 
-with safe_open(os.path.join(path, emb_path), framework="pt", device="cpu") as f:
+with safe_open(os.path.join(model_path, emb_path), framework="pt", device="cpu") as f:
     tensor_slice = f.get_slice("model.embed_tokens.weight")
     vocab_size, hidden_dim = tensor_slice.get_shape()
     tensor = tensor_slice[:, :hidden_dim]
 
-with safe_open(os.path.join(path, lm_head_path), framework="pt", device="cpu") as f:
+with safe_open(os.path.join(model_path, lm_head_path), framework="pt", device="cpu") as f:
     lm_head_weights = f.get_slice("lm_head.weight")[:, :]
 
 
 # -------------------------------- Create draft model + tokenizer + head --------------------------------
 
-tokenizer = AutoTokenizer.from_pretrained(path)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
 tokenizer.pad_token = tokenizer.eos_token
 
 model_args = LlamaConfig(
     vocab_size=vocab_size,
     hidden_size=hidden_dim,
-    intermediate_size=14336,
+    intermediate_size=12288,
     num_hidden_layers=1,
     bos_token_id=128000,
     eos_token_id=[128001, 128008, 128009],
-    num_key_value_heads=8,
-    num_attention_heads=32,
+    num_key_value_heads=28,
+    num_attention_heads=28,
     tie_word_embeddings=False,
 )
 
@@ -64,10 +68,10 @@ draft_model.embed_tokens.weight.requires_grad = False
 
 # Load head
 head = torch.nn.Linear(model_args.hidden_size, model_args.vocab_size, bias=False)
-with open(os.path.join(path, "model.safetensors.index.json"), "r") as f:
+with open(os.path.join(model_path, "model.safetensors.index.json"), "r") as f:
     index_json = json.loads(f.read())
     head_path = index_json["weight_map"]["lm_head.weight"]
-with safe_open(os.path.join(path, head_path), framework="pt", device="cpu") as f:
+with safe_open(os.path.join(model_path, head_path), framework="pt", device="cpu") as f:
     tensor_slice = f.get_slice("lm_head.weight")
     vocab_size, hidden_dim = tensor_slice.get_shape()
     tensor = tensor_slice[:, :hidden_dim].float()
@@ -78,8 +82,8 @@ head.eval()
 
 # -------------------------------- Load data --------------------------------
 
-sharegpt_datapaths = list_local_files("/mnt/ssd4tb/sharegpt_grouped_5k/")
-ultra_chat_datapaths = list_local_files("/mnt/ssd4tb/ultrachat_0_199999_mufp16/")
+sharegpt_datapaths = list_local_files(sharegpt_datapaths)
+ultra_chat_datapaths = list_local_files(ultra_chat_datapaths)
 
 combined_data_paths = (
     sharegpt_datapaths[: int(len(sharegpt_datapaths) * 0.95)] + ultra_chat_datapaths
@@ -132,3 +136,4 @@ trainer = EagleTrainer(
 )
 
 trainer.train()
+trainer.push_to_hub("baseten-admin/qwen2-5-eagle-test")

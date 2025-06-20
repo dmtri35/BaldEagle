@@ -84,7 +84,7 @@ def main(args):
         accept_length = 1.0
 
     print(
-        f"#questions: {len(questions)}, Throughput: {output_throughput:.2f} token/s, Acceptance length: {accept_length:.2f}"
+        f"#questions: {len(questions)}, Throughput: {output_throughput:.2f} token/s, Throughput per request: {output_throughput / args.num_questions:.2f} token/s, Acceptance length: {accept_length:.2f}"
     )
 
 
