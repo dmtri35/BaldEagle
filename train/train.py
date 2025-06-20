@@ -2,6 +2,13 @@ import json
 import os
 import torch
 import torch.distributed as dist
+
+# Disable wandb for non-main processes BEFORE importing it
+local_rank = int(os.environ.get("LOCAL_RANK", -1))
+if local_rank > 0:
+    os.environ["WANDB_DISABLED"] = "true"
+    os.environ["WANDB_MODE"] = "disabled"
+
 import wandb
 import random
 import argparse
@@ -24,7 +31,9 @@ from modules.trainer.trainer import EagleTrainer
 
 # Initialize wandb only on rank 0 to avoid conflicts
 run_name = "06-20-2025-Qwen2.5-7B-Instruct-EAGLE"
-if not dist.is_initialized() or dist.get_rank() == 0:
+
+# Only initialize wandb on the main process
+if local_rank <= 0:  # -1 for single GPU, 0 for main process in multi-GPU
     wandb.init(project="BaldEagle", mode="offline", name=run_name)
     wandb_run_name = wandb.run.name
 else:
@@ -99,8 +108,8 @@ head.eval()
 
 # -------------------------------- Load data --------------------------------
 
-sharegpt_datapaths = list_local_files(sharegpt_datapaths)
-ultra_chat_datapaths = list_local_files(ultra_chat_datapaths)
+sharegpt_datapaths = list_local_files(sharegpt_datapaths)[:1000]
+ultra_chat_datapaths = list_local_files(ultra_chat_datapaths)[:1000]
 
 combined_data_paths = (
     sharegpt_datapaths[: int(len(sharegpt_datapaths) * 0.95)] + ultra_chat_datapaths
@@ -152,7 +161,7 @@ training_args = TrainingArguments(
     save_strategy="steps",
     save_steps=0.1,  # saves every 10% of training
     save_total_limit=3,
-    report_to=["wandb"] if (not dist.is_initialized() or dist.get_rank() == 0) else [],  # Only log to wandb on rank 0
+    report_to=["wandb"] if local_rank <= 0 else [],  # Only log to wandb on rank 0
     log_on_each_node=False,  # Only log on main process
     logging_dir=f'{args.output_dir}/logs',  # TensorBoard log dir
 )
@@ -192,6 +201,7 @@ trainer = EagleTrainerWithFSDP(
 trainer.train()
 
 # Only push to hub and finish wandb on rank 0
-if not dist.is_initialized() or dist.get_rank() == 0:
+if local_rank <= 0:
     trainer.push_to_hub(hf_repo)
-    wandb.finish()  # Properly close wandb run
+    if local_rank == 0 or local_rank == -1:  # Only finish wandb if it was initialized
+        wandb.finish()  # Properly close wandb run
