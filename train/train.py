@@ -22,9 +22,13 @@ from modules.data.data import (
 )
 from modules.trainer.trainer import EagleTrainer
 
+# Initialize wandb only on rank 0 to avoid conflicts
 run_name = "06-20-2025-Qwen2.5-7B-Instruct-EAGLE"
-wandb.init(project="BaldEagle", mode="offline", name=run_name)
-wandb_run_name = wandb.run.name
+if not dist.is_initialized() or dist.get_rank() == 0:
+    wandb.init(project="BaldEagle", mode="offline", name=run_name)
+    wandb_run_name = wandb.run.name
+else:
+    wandb_run_name = run_name  # Use static name for non-rank-0 processes
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model-path", type=str, default=os.environ["MODEL_PATH"])
@@ -148,6 +152,9 @@ training_args = TrainingArguments(
     save_strategy="steps",
     save_steps=0.1,  # saves every 10% of training
     save_total_limit=3,
+    report_to=["wandb"] if (not dist.is_initialized() or dist.get_rank() == 0) else [],  # Only log to wandb on rank 0
+    log_on_each_node=False,  # Only log on main process
+    logging_dir=f'{args.output_dir}/logs',  # TensorBoard log dir
 )
 
 # Handle FSDP device placement for head module
@@ -183,5 +190,8 @@ trainer = EagleTrainerWithFSDP(
 )
 
 trainer.train()
-if dist.get_rank() == 0:
+
+# Only push to hub and finish wandb on rank 0
+if not dist.is_initialized() or dist.get_rank() == 0:
     trainer.push_to_hub(hf_repo)
+    wandb.finish()  # Properly close wandb run
