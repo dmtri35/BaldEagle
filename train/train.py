@@ -48,10 +48,10 @@ with open(os.path.join(model_path, "model.safetensors.index.json"), "r") as f:
 with safe_open(os.path.join(model_path, emb_path), framework="pt", device="cpu") as f:
     tensor_slice = f.get_slice("model.embed_tokens.weight")
     vocab_size, hidden_dim = tensor_slice.get_shape()
-    tensor = tensor_slice[:, :hidden_dim]
+    tensor = tensor_slice[:, :hidden_dim].to(torch.bfloat16)
 
 with safe_open(os.path.join(model_path, lm_head_path), framework="pt", device="cpu") as f:
-    lm_head_weights = f.get_slice("lm_head.weight")[:, :]
+    lm_head_weights = f.get_slice("lm_head.weight")[:, :].to(torch.bfloat16)
 
 
 # -------------------------------- Create draft model + tokenizer + head --------------------------------
@@ -69,25 +69,27 @@ model_args = LlamaConfig(
     num_key_value_heads=28,
     num_attention_heads=28,
     tie_word_embeddings=False,
+    torch_dtype=torch.bfloat16,
 )
 
 draft_model = LlamaForCausalLMEagle(model_args)
 draft_model.load_embedding_weights(tensor)
-# Don't move to device yet when using FSDP - let trainer handle it
+# Ensure all parameters are bfloat16 for FSDP
+for param in draft_model.parameters():
+    param.data = param.data.to(torch.bfloat16)
 draft_model.embed_tokens.requires_grad_(False)  # Use in-place operation
 
 # Load head
-head = torch.nn.Linear(model_args.hidden_size, model_args.vocab_size, bias=False)
+head = torch.nn.Linear(model_args.hidden_size, model_args.vocab_size, bias=False, dtype=torch.bfloat16)
 with open(os.path.join(model_path, "model.safetensors.index.json"), "r") as f:
     index_json = json.loads(f.read())
     head_path = index_json["weight_map"]["lm_head.weight"]
 with safe_open(os.path.join(model_path, head_path), framework="pt", device="cpu") as f:
     tensor_slice = f.get_slice("lm_head.weight")
     vocab_size, hidden_dim = tensor_slice.get_shape()
-    tensor = tensor_slice[:, :hidden_dim].float()
+    tensor = tensor_slice[:, :hidden_dim].to(torch.bfloat16)
 
 head.weight.data = tensor
-# Don't move to device yet when using FSDP
 head.eval()
 
 # -------------------------------- Load data --------------------------------
@@ -121,6 +123,10 @@ training_args = TrainingArguments(
         "fsdp_use_orig_params": True,  # Needed for gradient checkpointing
         "fsdp_cpu_ram_efficient_loading": False,  # Set to True if you have CPU memory constraints
         "fsdp_sync_module_states": True,  # Sync states across processes
+        "fsdp_backward_prefetch": "backward_pre",  # Prefetch gradients during backward pass
+        "fsdp_forward_prefetch": False,  # Don't prefetch in forward pass (dynamic graphs)
+        "fsdp_offload_params": False,  # Set to True to offload params to CPU (saves GPU memory)
+        "fsdp_sharding_strategy": "full_shard",  # Can also be "shard_grad_op" for ZeRO-2 style
     },
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
@@ -147,10 +153,11 @@ training_args = TrainingArguments(
 class EagleTrainerWithFSDP(EagleTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Move head to the same device as the model after FSDP wrapping
+        # Move head to the same device and dtype as the model after FSDP wrapping
         if self.model is not None:
             device = next(self.model.parameters()).device
-            self.head = self.head.to(device)
+            dtype = next(self.model.parameters()).dtype
+            self.head = self.head.to(device=device, dtype=dtype)
 
 trainer = EagleTrainerWithFSDP(
     model=draft_model,
