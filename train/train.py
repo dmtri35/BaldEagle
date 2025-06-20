@@ -65,7 +65,7 @@ model_args = LlamaConfig(
     intermediate_size=12288,
     num_hidden_layers=1,
     bos_token_id=128000,
-    eos_token_id=[128001, 128008, 128009],
+    eos_token_id=128001,  # Use the first EOS token ID as int
     num_key_value_heads=28,
     num_attention_heads=28,
     tie_word_embeddings=False,
@@ -73,8 +73,8 @@ model_args = LlamaConfig(
 
 draft_model = LlamaForCausalLMEagle(model_args)
 draft_model.load_embedding_weights(tensor)
-draft_model.to("cuda:0")
-draft_model.embed_tokens.weight.requires_grad = False
+# Don't move to device yet when using FSDP - let trainer handle it
+draft_model.embed_tokens.requires_grad_(False)  # Use in-place operation
 
 # Load head
 head = torch.nn.Linear(model_args.hidden_size, model_args.vocab_size, bias=False)
@@ -87,7 +87,7 @@ with safe_open(os.path.join(model_path, head_path), framework="pt", device="cpu"
     tensor = tensor_slice[:, :hidden_dim].float()
 
 head.weight.data = tensor
-head.to("cuda:0")
+# Don't move to device yet when using FSDP
 head.eval()
 
 # -------------------------------- Load data --------------------------------
@@ -114,7 +114,14 @@ training_args = TrainingArguments(
     output_dir=args.output_dir,
     num_train_epochs=args.epochs,
     gradient_accumulation_steps=16,
-    fsdp=True,
+    fsdp="full_shard",  # Use FSDP full_shard strategy
+    fsdp_config={
+        "fsdp_min_num_params": 2000,  # Wrap layers with >2000 params
+        "fsdp_transformer_layer_cls_to_wrap": ["LlamaDecoderLayer"],  # Wrap Llama layers
+        "fsdp_use_orig_params": True,  # Needed for gradient checkpointing
+        "fsdp_cpu_ram_efficient_loading": False,  # Set to True if you have CPU memory constraints
+        "fsdp_sync_module_states": True,  # Sync states across processes
+    },
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     remove_unused_columns=False,
@@ -136,14 +143,23 @@ training_args = TrainingArguments(
     save_total_limit=3,
 )
 
-trainer = EagleTrainer(
+# Move head to device after trainer is initialized
+class EagleTrainerWithFSDP(EagleTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Move head to the same device as the model after FSDP wrapping
+        if self.model is not None:
+            device = next(self.model.parameters()).device
+            self.head = self.head.to(device)
+
+trainer = EagleTrainerWithFSDP(
     model=draft_model,
     head=head,
     args=training_args,
     train_dataset=eagle_train_dataset,
     eval_dataset=eagle_test_dataset,
     data_collator=eagle_collator,
-    min_lr_ratio=0.5,  # Custmer lr scheduler param
+    min_lr_ratio=0.5,  # Custom lr scheduler param
 )
 
 trainer.train()
