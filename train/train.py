@@ -44,7 +44,7 @@ parser.add_argument("--model-path", type=str, default=os.environ["MODEL_PATH"])
 parser.add_argument("--sharegpt-datapaths", type=str, default=os.environ["SHAREGPT_DATAPATHS"])
 parser.add_argument("--ultra-chat-datapaths", type=str, default=os.environ["ULTRACHAT_DATAPATHS"])
 parser.add_argument("--output-dir", type=str, default=f"./hf_trainer_output_dir/{wandb_run_name}")
-parser.add_argument("--epochs", type=int, default=10)
+parser.add_argument("--epochs", type=int, default=1)
 args = parser.parse_args()
 
 model_path = args.model_path
