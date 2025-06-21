@@ -108,14 +108,14 @@ head.eval()
 
 # -------------------------------- Load data --------------------------------
 
-sharegpt_datapaths = list_local_files(sharegpt_datapaths)
-# ultra_chat_datapaths = list_local_files(ultra_chat_datapaths)
+sharegpt_datapaths = list_local_files(sharegpt_datapaths)[0]
+ultra_chat_datapaths = list_local_files(ultra_chat_datapaths)[0]
 
 combined_data_paths = (
-    sharegpt_datapaths[: int(len(sharegpt_datapaths) * 0.05)]
+    sharegpt_datapaths[: int(len(sharegpt_datapaths) * 0.95)] + ultra_chat_datapaths
 )
 random.Random(42).shuffle(combined_data_paths)
-eval_data_paths = sharegpt_datapaths[int(len(sharegpt_datapaths) * 0.05) :][:100]
+eval_data_paths = sharegpt_datapaths[int(len(sharegpt_datapaths) * 0.95) :][:100]
 
 eagle_train_dataset = EagleLocalDataset(
     combined_data_paths, transform=AddUniformNoise(std=0.5)
