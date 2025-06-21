@@ -115,7 +115,7 @@ combined_data_paths = (
     sharegpt_datapaths[: int(len(sharegpt_datapaths) * 0.05)]
 )
 random.Random(42).shuffle(combined_data_paths)
-eval_data_paths = sharegpt_datapaths[int(len(sharegpt_datapaths) * 0.95) :][:100]
+eval_data_paths = sharegpt_datapaths[int(len(sharegpt_datapaths) * 0.05) :][:100]
 
 eagle_train_dataset = EagleLocalDataset(
     combined_data_paths, transform=AddUniformNoise(std=0.5)
@@ -130,17 +130,18 @@ training_args = TrainingArguments(
     output_dir=args.output_dir,
     num_train_epochs=args.epochs,
     gradient_accumulation_steps=16,
-    fsdp="full_shard offload",  # Use FSDP full_shard strategy
+    fsdp="full_shard",  # Use FSDP full_shard strategy (remove offload from here)
     fsdp_config={
-        "fsdp_min_num_params": 2000,  # Wrap layers with >2000 params
+        "fsdp_min_num_params": 1000,  # Lower threshold to wrap more layers individually (reduces all-gather size)
         "fsdp_transformer_layer_cls_to_wrap": ["LlamaDecoderLayer"],  # Wrap Llama layers
         "fsdp_use_orig_params": True,  # Needed for gradient checkpointing
         "fsdp_cpu_ram_efficient_loading": False,  # Set to True if you have CPU memory constraints
         "fsdp_sync_module_states": True,  # Sync states across processes
         "fsdp_backward_prefetch": "backward_pre",  # Prefetch gradients during backward pass
         "fsdp_forward_prefetch": False,  # Don't prefetch in forward pass (dynamic graphs)
-        "fsdp_offload_params": True,  # Set to True to offload params to CPU (saves GPU memory)
+        "fsdp_offload_params": False,  # Disable CPU offload (can cause timeouts)
         "fsdp_sharding_strategy": "full_shard",  # Can also be "shard_grad_op" for ZeRO-2 style
+        "fsdp_activation_checkpointing": False,  # Disable activation checkpointing
     },
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
