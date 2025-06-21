@@ -118,9 +118,9 @@ random.Random(42).shuffle(combined_data_paths)
 eval_data_paths = sharegpt_datapaths[int(len(sharegpt_datapaths) * 0.95) :][:100]
 
 eagle_train_dataset = EagleLocalDataset(
-    combined_data_paths, transform=AddUniformNoise(std=0.5)
+    combined_data_paths, transform=AddUniformNoise(std=0.5), max_len=1024
 )
-eagle_test_dataset = EagleLocalDataset(eval_data_paths)
+eagle_test_dataset = EagleLocalDataset(eval_data_paths, max_len=1024)
 
 eagle_collator = DataCollatorWithPadding()
 
