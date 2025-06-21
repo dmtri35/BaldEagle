@@ -108,8 +108,8 @@ head.eval()
 
 # -------------------------------- Load data --------------------------------
 
-sharegpt_datapaths = list_local_files(sharegpt_datapaths)[:1000]
-ultra_chat_datapaths = list_local_files(ultra_chat_datapaths)[:1000]
+sharegpt_datapaths = list_local_files(sharegpt_datapaths)
+ultra_chat_datapaths = list_local_files(ultra_chat_datapaths)
 
 combined_data_paths = (
     sharegpt_datapaths[: int(len(sharegpt_datapaths) * 0.95)] + ultra_chat_datapaths
@@ -130,7 +130,7 @@ training_args = TrainingArguments(
     output_dir=args.output_dir,
     num_train_epochs=args.epochs,
     gradient_accumulation_steps=16,
-    fsdp="full_shard",  # Use FSDP full_shard strategy
+    fsdp="full_shard offload",  # Use FSDP full_shard strategy
     fsdp_config={
         "fsdp_min_num_params": 2000,  # Wrap layers with >2000 params
         "fsdp_transformer_layer_cls_to_wrap": ["LlamaDecoderLayer"],  # Wrap Llama layers
@@ -139,7 +139,7 @@ training_args = TrainingArguments(
         "fsdp_sync_module_states": True,  # Sync states across processes
         "fsdp_backward_prefetch": "backward_pre",  # Prefetch gradients during backward pass
         "fsdp_forward_prefetch": False,  # Don't prefetch in forward pass (dynamic graphs)
-        "fsdp_offload_params": False,  # Set to True to offload params to CPU (saves GPU memory)
+        "fsdp_offload_params": True,  # Set to True to offload params to CPU (saves GPU memory)
         "fsdp_sharding_strategy": "full_shard",  # Can also be "shard_grad_op" for ZeRO-2 style
     },
     per_device_train_batch_size=1,
@@ -164,6 +164,9 @@ training_args = TrainingArguments(
     report_to=["wandb"] if local_rank <= 0 else [],  # Only log to wandb on rank 0
     log_on_each_node=False,  # Only log on main process
     logging_dir=f'{args.output_dir}/logs',  # TensorBoard log dir
+    push_to_hub=True,
+    hub_model_id=hf_repo,
+    hub_private_repo=True,
 )
 
 # Handle FSDP device placement for head module
@@ -202,6 +205,7 @@ trainer.train()
 
 # Only push to hub and finish wandb on rank 0
 if local_rank <= 0:
+    print("Pushing to hub...")
     trainer.push_to_hub(hf_repo)
     if local_rank == 0 or local_rank == -1:  # Only finish wandb if it was initialized
         wandb.finish()  # Properly close wandb run
